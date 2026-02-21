@@ -1,0 +1,98 @@
+{
+  "agent_name": "Profile Roast Agent",
+  "agent_id": "699960c4730bbd74d53e899f",
+  "description": "Analyzes LinkedIn profile sections (headline, about, experience, skills) with brutal honesty, generates section-specific roasts and improvements, calculates weighted overall score, and produces a comprehensive master roast.",
+  "agent_type": "json",
+  "accessor": "result",
+  "auto_generated": true,
+  "response_schema": {
+    "result": {
+      "overall_score": "number",
+      "grade": "string",
+      "master_roast": "string",
+      "sections": {
+        "headline": {
+          "score": "number",
+          "roast": "string",
+          "improvements": [
+            "string"
+          ]
+        },
+        "about": {
+          "score": "number",
+          "roast": "string",
+          "improved_version": "string"
+        },
+        "experience": {
+          "score": "number",
+          "roast": "string",
+          "improvements": [
+            "string"
+          ]
+        },
+        "skills": {
+          "score": "number",
+          "roast": "string",
+          "improvements": [
+            "string"
+          ]
+        }
+      },
+      "action_plan": [
+        {
+          "step": "number",
+          "title": "string",
+          "description": "string",
+          "priority": "string"
+        }
+      ],
+      "strongest_section": "string",
+      "weakest_section": "string"
+    }
+  },
+  "example_response": {
+    "result": {
+      "overall_score": 0,
+      "grade": "Letter grade A+ to F",
+      "master_roast": "The comprehensive master roast",
+      "sections": {
+        "headline": {
+          "score": 0,
+          "roast": "Roast for the headline",
+          "improvements": [
+            "sample string"
+          ]
+        },
+        "about": {
+          "score": 0,
+          "roast": "Roast for the about section",
+          "improved_version": "Improved about section text"
+        },
+        "experience": {
+          "score": 0,
+          "roast": "Roast for the experience section",
+          "improvements": [
+            "sample string"
+          ]
+        },
+        "skills": {
+          "score": 0,
+          "roast": "Roast for the skills section",
+          "improvements": [
+            "sample string"
+          ]
+        }
+      },
+      "action_plan": [
+        {
+          "step": 0,
+          "title": "Action item title",
+          "description": "Detailed description of the action",
+          "priority": "Priority level: high, medium, or low"
+        }
+      ],
+      "strongest_section": "The strongest profile section",
+      "weakest_section": "The weakest profile section"
+    }
+  }
+}

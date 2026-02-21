@@ -1,0 +1,100 @@
+{
+  "agent_name": "Post Roast Agent",
+  "agent_id": "699960c41b86f70befdb2390",
+  "description": "Analyzes LinkedIn post drafts for cringe patterns, generates a brutally honest roast, creates two rewritten versions (storytelling and data-driven), and predicts engagement scores for all three versions.",
+  "agent_type": "json",
+  "accessor": "result",
+  "auto_generated": true,
+  "response_schema": {
+    "result": {
+      "roast_text": "string",
+      "cringe_score": "number",
+      "cringe_patterns": [
+        {
+          "pattern": "string",
+          "severity": "number"
+        }
+      ],
+      "storytelling_rewrite": {
+        "title": "string",
+        "content": "string",
+        "hook": "string"
+      },
+      "data_driven_rewrite": {
+        "title": "string",
+        "content": "string",
+        "hook": "string"
+      },
+      "engagement_predictions": {
+        "original": {
+          "likes": "string",
+          "comments": "string",
+          "shares": "string",
+          "score": "number",
+          "reasoning": "string"
+        },
+        "storytelling": {
+          "likes": "string",
+          "comments": "string",
+          "shares": "string",
+          "score": "number",
+          "reasoning": "string"
+        },
+        "data_driven": {
+          "likes": "string",
+          "comments": "string",
+          "shares": "string",
+          "score": "number",
+          "reasoning": "string"
+        }
+      },
+      "improvement_summary": "string"
+    }
+  },
+  "example_response": {
+    "result": {
+      "roast_text": "The brutal roast of the LinkedIn post",
+      "cringe_score": 0,
+      "cringe_patterns": [
+        {
+          "pattern": "The cringe pattern identified",
+          "severity": 0
+        }
+      ],
+      "storytelling_rewrite": {
+        "title": "Title for the storytelling rewrite",
+        "content": "The full storytelling rewrite",
+        "hook": "The opening hook line"
+      },
+      "data_driven_rewrite": {
+        "title": "Title for the data-driven rewrite",
+        "content": "The full data-driven rewrite",
+        "hook": "The opening hook line"
+      },
+      "engagement_predictions": {
+        "original": {
+          "likes": "Estimated likes range",
+          "comments": "Estimated comments range",
+          "shares": "Estimated shares range",
+          "score": 0,
+          "reasoning": "Brief reasoning for the score"
+        },
+        "storytelling": {
+          "likes": "Estimated likes range",
+          "comments": "Estimated comments range",
+          "shares": "Estimated shares range",
+          "score": 0,
+          "reasoning": "Brief reasoning for the score"
+        },
+        "data_driven": {
+          "likes": "Estimated likes range",
+          "comments": "Estimated comments range",
+          "shares": "Estimated shares range",
+          "score": 0,
+          "reasoning": "Brief reasoning for the score"
+        }
+      },
+      "improvement_summary": "Key improvements made in the rewrites"
+    }
+  }
+}

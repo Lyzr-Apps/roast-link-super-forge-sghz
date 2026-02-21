@@ -1,0 +1,55 @@
+{
+  "app_name": "RoastMyPost AI",
+  "pattern": "multiple_independent_agents",
+  "agents": {
+    "post_roast_agent": {
+      "agent_id": "699960c41b86f70befdb2390",
+      "name": "Post Roast Agent",
+      "description": "Analyzes LinkedIn post drafts for cringe patterns, generates a brutally honest roast, creates two rewritten versions (storytelling and data-driven), and predicts engagement scores for all three versions.",
+      "provider": "Anthropic",
+      "model": "claude-sonnet-4-5",
+      "temperature": 0.7,
+      "top_p": 0.95,
+      "agent_type": "json",
+      "accessor": "result",
+      "capabilities": {
+        "image_output": false,
+        "voice": false,
+        "file_output": false
+      },
+      "trigger": "Roast This Post button"
+    },
+    "profile_roast_agent": {
+      "agent_id": "699960c4730bbd74d53e899f",
+      "name": "Profile Roast Agent",
+      "description": "Analyzes LinkedIn profile sections (headline, about, experience, skills) with brutal honesty, generates section-specific roasts and improvements, calculates weighted overall score, and produces a comprehensive master roast.",
+      "provider": "Anthropic",
+      "model": "claude-sonnet-4-5",
+      "temperature": 0.7,
+      "top_p": 0.95,
+      "agent_type": "json",
+      "accessor": "result",
+      "capabilities": {
+        "image_output": false,
+        "voice": false,
+        "file_output": false
+      },
+      "trigger": "Roast This Profile button"
+    }
+  },
+  "workflow": {
+    "nodes": [
+      {"id": "input_node", "type": "Input", "label": "User Input", "nodeCategory": "input"},
+      {"id": "post_roast_agent", "type": "Agent", "label": "Post Roast Agent", "nodeCategory": "agent"},
+      {"id": "profile_roast_agent", "type": "Agent", "label": "Profile Roast Agent", "nodeCategory": "agent"},
+      {"id": "post_output", "type": "Output", "label": "Post Roast Results", "nodeCategory": "end"},
+      {"id": "profile_output", "type": "Output", "label": "Profile Roast Results", "nodeCategory": "end"}
+    ],
+    "edges": [
+      {"source": "input_node", "target": "post_roast_agent"},
+      {"source": "input_node", "target": "profile_roast_agent"},
+      {"source": "post_roast_agent", "target": "post_output"},
+      {"source": "profile_roast_agent", "target": "profile_output"}
+    ]
+  }
+}
