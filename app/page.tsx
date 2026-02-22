@@ -1,13 +1,13 @@
 'use client'
 
-import React, { useState, useCallback, useEffect } from 'react'
+import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { callAIAgent } from '@/lib/aiAgent'
 import { copyToClipboard } from '@/lib/clipboard'
 import {
   FiEdit3, FiUser, FiArrowLeft, FiCopy, FiCheck, FiChevronDown, FiChevronUp,
   FiTarget, FiStar, FiAlertTriangle, FiTrendingUp, FiBarChart2, FiBookOpen,
   FiZap, FiBriefcase, FiActivity, FiRefreshCw, FiShare2, FiAward, FiMessageCircle,
-  FiThumbsUp, FiLayers
+  FiThumbsUp, FiLayers, FiImage, FiUploadCloud, FiX, FiCamera, FiLock, FiLoader
 } from 'react-icons/fi'
 
 // ---- Types ----
@@ -235,7 +235,55 @@ function getSeverityWidth(severity: number): string {
   return `${Math.min(Math.max(severity, 0), 10) * 10}%`
 }
 
+// ---- File/Image Utilities ----
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result as string
+      const base64 = result.split(',')[1]
+      resolve(base64)
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
+function validateImage(file: File): string | null {
+  const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp']
+  if (!allowedTypes.includes(file.type)) {
+    return 'Please upload a PNG, JPEG, or WebP image.'
+  }
+  const maxSize = 10 * 1024 * 1024
+  if (file.size > maxSize) {
+    return 'Image must be smaller than 10MB.'
+  }
+  return null
+}
+
 // ---- Sub-components ----
+
+function TabSwitcher({ tabs, activeTab, onTabChange }: { tabs: { id: string; label: string; icon: React.ReactNode }[]; activeTab: string; onTabChange: (id: string) => void }) {
+  return (
+    <div className="flex rounded-xl p-1 mb-6" style={{ background: THEME.secondary }}>
+      {tabs.map((tab) => (
+        <button
+          key={tab.id}
+          onClick={() => onTabChange(tab.id)}
+          className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all duration-200"
+          style={{
+            background: activeTab === tab.id ? THEME.card : 'transparent',
+            color: activeTab === tab.id ? THEME.fg : THEME.mutedFg,
+            boxShadow: activeTab === tab.id ? `0 2px 8px ${THEME.bg}` : 'none',
+          }}
+        >
+          {tab.icon}
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  )
+}
 
 function ScoreCircle({ score, size = 120, color, label }: { score: number; size?: number; color: string; label?: string }) {
   const [animatedScore, setAnimatedScore] = useState(0)
@@ -264,12 +312,12 @@ function ScoreCircle({ score, size = 120, color, label }: { score: number; size?
   const offset = circumference - (animatedScore / 100) * circumference
 
   return (
-    <div className="flex flex-col items-center">
+    <div className="relative flex flex-col items-center">
       <svg width={size} height={size} className="transform -rotate-90">
         <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={THEME.muted} strokeWidth="8" />
         <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={color} strokeWidth="8" strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round" className="transition-all duration-1000" />
       </svg>
-      <div className="absolute flex flex-col items-center justify-center" style={{ width: size, height: size }}>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
         <span className="font-serif font-bold text-2xl" style={{ color }}>{animatedScore}</span>
         {label && <span className="text-xs" style={{ color: THEME.mutedFg }}>{label}</span>}
       </div>
@@ -432,6 +480,19 @@ export default function Page() {
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null)
   const [loadingMsg, setLoadingMsg] = useState('')
   const [sampleData, setSampleData] = useState(false)
+  const [postInputTab, setPostInputTab] = useState<'type' | 'upload'>('type')
+  const [profileInputTab, setProfileInputTab] = useState<'type' | 'upload'>('type')
+  const [uploadedImage, setUploadedImage] = useState<{ base64: string; mediaType: string; preview: string } | null>(null)
+  const [profileUploadedImage, setProfileUploadedImage] = useState<{ base64: string; mediaType: string; preview: string } | null>(null)
+  const [extracting, setExtracting] = useState(false)
+  const [extractedPostText, setExtractedPostText] = useState('')
+  const [extractedProfileData, setExtractedProfileData] = useState<{ headline: string; about: string; experience: string; skills: string } | null>(null)
+  const [extractionError, setExtractionError] = useState<string | null>(null)
+  const [isDragOver, setIsDragOver] = useState(false)
+  const [publishingToLinkedIn, setPublishingToLinkedIn] = useState(false)
+  const [linkedInPublishResult, setLinkedInPublishResult] = useState<{ success: boolean; message: string } | null>(null)
+  const postFileInputRef = useRef<HTMLInputElement>(null)
+  const profileFileInputRef = useRef<HTMLInputElement>(null)
 
   // Loading message cycling
   useEffect(() => {
@@ -527,6 +588,123 @@ export default function Page() {
       setActiveAgentId(null)
     }
   }, [profileData])
+
+  // ---- Image Upload Handlers ----
+  const handlePostImageSelect = useCallback(async (file: File) => {
+    const validationErr = validateImage(file)
+    if (validationErr) { setExtractionError(validationErr); return }
+    setExtractionError(null)
+    setExtractedPostText('')
+    try {
+      const base64 = await fileToBase64(file)
+      const preview = URL.createObjectURL(file)
+      setUploadedImage({ base64, mediaType: file.type, preview })
+    } catch { setExtractionError('Failed to read the image file.') }
+  }, [])
+
+  const handleProfileImageSelect = useCallback(async (file: File) => {
+    const validationErr = validateImage(file)
+    if (validationErr) { setExtractionError(validationErr); return }
+    setExtractionError(null)
+    setExtractedProfileData(null)
+    try {
+      const base64 = await fileToBase64(file)
+      const preview = URL.createObjectURL(file)
+      setProfileUploadedImage({ base64, mediaType: file.type, preview })
+    } catch { setExtractionError('Failed to read the image file.') }
+  }, [])
+
+  const handleExtractPost = useCallback(async () => {
+    if (!uploadedImage) return
+    setExtracting(true)
+    setExtractionError(null)
+    try {
+      const res = await fetch('/api/ocr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_base64: uploadedImage.base64, media_type: uploadedImage.mediaType, mode: 'post' }),
+      })
+      const data = await res.json()
+      if (data.success && data.extracted_text) {
+        setExtractedPostText(data.extracted_text)
+      } else {
+        setExtractionError(data.error || 'Failed to extract text from the image.')
+      }
+    } catch { setExtractionError('Network error during text extraction. Please try again.') }
+    finally { setExtracting(false) }
+  }, [uploadedImage])
+
+  const handleExtractProfile = useCallback(async () => {
+    if (!profileUploadedImage) return
+    setExtracting(true)
+    setExtractionError(null)
+    try {
+      const res = await fetch('/api/ocr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_base64: profileUploadedImage.base64, media_type: profileUploadedImage.mediaType, mode: 'profile' }),
+      })
+      const data = await res.json()
+      if (data.success && data.profile_data) {
+        setExtractedProfileData(data.profile_data)
+      } else {
+        setExtractionError(data.error || 'Failed to extract profile data from the image.')
+      }
+    } catch { setExtractionError('Network error during extraction. Please try again.') }
+    finally { setExtracting(false) }
+  }, [profileUploadedImage])
+
+  const handleConfirmExtractedPost = useCallback(() => {
+    if (extractedPostText) {
+      setPostDraft(extractedPostText)
+      setPostInputTab('type')
+      setUploadedImage(null)
+      setExtractedPostText('')
+    }
+  }, [extractedPostText])
+
+  const handleConfirmExtractedProfile = useCallback(() => {
+    if (extractedProfileData) {
+      setProfileData(extractedProfileData)
+      setProfileInputTab('type')
+      setProfileUploadedImage(null)
+      setExtractedProfileData(null)
+    }
+  }, [extractedProfileData])
+
+  const handleDragOver = useCallback((e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragOver(true) }, [])
+  const handleDragLeave = useCallback((e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragOver(false) }, [])
+
+  const handlePostDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault(); e.stopPropagation(); setIsDragOver(false)
+    const file = e.dataTransfer.files?.[0]
+    if (file) handlePostImageSelect(file)
+  }, [handlePostImageSelect])
+
+  const handleProfileDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault(); e.stopPropagation(); setIsDragOver(false)
+    const file = e.dataTransfer.files?.[0]
+    if (file) handleProfileImageSelect(file)
+  }, [handleProfileImageSelect])
+
+  // ---- LinkedIn Publish Handler ----
+  const handlePublishToLinkedIn = useCallback(async (postContent: string) => {
+    setPublishingToLinkedIn(true)
+    setLinkedInPublishResult(null)
+    try {
+      const result = await callAIAgent(
+        `Please publish this post to my LinkedIn profile. Post content:\n\n${postContent}`,
+        POST_AGENT_ID
+      )
+      if (result.success) {
+        setLinkedInPublishResult({ success: true, message: 'Post published to LinkedIn successfully!' })
+      } else {
+        setLinkedInPublishResult({ success: false, message: result.error || 'Failed to publish. Please try again.' })
+      }
+    } catch {
+      setLinkedInPublishResult({ success: false, message: 'Network error. Please try again.' })
+    } finally { setPublishingToLinkedIn(false) }
+  }, [])
 
   // ---- Landing Screen ----
   function LandingScreen() {
@@ -628,52 +806,180 @@ export default function Page() {
     const isValid = charCount >= 50
     return (
       <div className="min-h-screen flex flex-col px-4 py-8 max-w-2xl mx-auto w-full">
-        <button onClick={() => { setScreen('landing'); setError(null) }} className="inline-flex items-center gap-2 text-sm mb-8 transition-colors duration-200" style={{ color: THEME.mutedFg }}>
+        <button onClick={() => { setScreen('landing'); setError(null); setExtractionError(null) }} className="inline-flex items-center gap-2 text-sm mb-8 transition-colors duration-200" style={{ color: THEME.mutedFg }}>
           <FiArrowLeft className="w-4 h-4" /> Back to home
         </button>
 
         <div className="mb-6">
           <h1 className="font-serif font-bold text-2xl md:text-3xl mb-2" style={{ color: THEME.fg }}>Roast My Post Draft</h1>
-          <p className="text-sm" style={{ color: THEME.mutedFg }}>Paste your LinkedIn post draft below for a brutally honest critique.</p>
+          <p className="text-sm" style={{ color: THEME.mutedFg }}>Paste your LinkedIn post draft or upload a screenshot for a brutally honest critique.</p>
         </div>
 
-        <div className="rounded-xl p-1 mb-2" style={{ background: THEME.card, border: `1px solid ${THEME.border}` }}>
-          <textarea
-            value={postDraft}
-            onChange={(e) => setPostDraft(e.target.value.slice(0, 3000))}
-            placeholder="Paste your LinkedIn post draft here... (minimum 50 characters)"
-            className="w-full min-h-[240px] p-4 rounded-lg text-sm leading-relaxed resize-y focus:outline-none placeholder-opacity-50"
-            style={{ background: THEME.input, color: THEME.fg, border: 'none' }}
-          />
-        </div>
-        <div className="flex items-center justify-between mb-6">
-          <span className="text-xs" style={{ color: charCount < 50 ? THEME.chart5 : THEME.mutedFg }}>
-            {charCount < 50 ? `${50 - charCount} more characters needed` : 'Ready to roast'}
-          </span>
-          <span className="text-xs" style={{ color: charCount > 2800 ? THEME.chart3 : THEME.mutedFg }}>
-            {charCount}/3,000
-          </span>
-        </div>
+        <TabSwitcher
+          tabs={[
+            { id: 'type', label: 'Type Post', icon: <FiEdit3 className="w-4 h-4" /> },
+            { id: 'upload', label: 'Upload Screenshot', icon: <FiCamera className="w-4 h-4" /> },
+          ]}
+          activeTab={postInputTab}
+          onTabChange={(id) => { setPostInputTab(id as 'type' | 'upload'); setExtractionError(null) }}
+        />
 
-        {error && (
-          <div className="rounded-lg p-3 mb-4 text-sm" style={{ background: `${THEME.chart5}15`, color: THEME.chart5, border: `1px solid ${THEME.chart5}33` }}>
-            <FiAlertTriangle className="w-4 h-4 inline mr-2" />{error}
+        {postInputTab === 'type' ? (
+          <>
+            <div className="rounded-xl p-1 mb-2" style={{ background: THEME.card, border: `1px solid ${THEME.border}` }}>
+              <textarea
+                value={postDraft}
+                onChange={(e) => setPostDraft(e.target.value.slice(0, 3000))}
+                placeholder="Paste your LinkedIn post draft here... (minimum 50 characters)"
+                className="w-full min-h-[240px] p-4 rounded-lg text-sm leading-relaxed resize-y focus:outline-none placeholder-opacity-50"
+                style={{ background: THEME.input, color: THEME.fg, border: 'none' }}
+              />
+            </div>
+            <div className="flex items-center justify-between mb-6">
+              <span className="text-xs" style={{ color: charCount < 50 ? THEME.chart5 : THEME.mutedFg }}>
+                {charCount < 50 ? `${50 - charCount} more characters needed` : 'Ready to roast'}
+              </span>
+              <span className="text-xs" style={{ color: charCount > 2800 ? THEME.chart3 : THEME.mutedFg }}>
+                {charCount}/3,000
+              </span>
+            </div>
+
+            {error && (
+              <div className="rounded-lg p-3 mb-4 text-sm" style={{ background: `${THEME.chart5}15`, color: THEME.chart5, border: `1px solid ${THEME.chart5}33` }}>
+                <FiAlertTriangle className="w-4 h-4 inline mr-2" />{error}
+              </div>
+            )}
+
+            <button
+              onClick={handlePostRoast}
+              disabled={!isValid}
+              className="w-full py-3.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all duration-200"
+              style={{
+                background: isValid ? THEME.accent : THEME.muted,
+                color: isValid ? THEME.accentFg : THEME.mutedFg,
+                cursor: isValid ? 'pointer' : 'not-allowed',
+                opacity: isValid ? 1 : 0.6,
+              }}
+            >
+              <FiZap className="w-4 h-4" /> Roast This Post
+            </button>
+          </>
+        ) : (
+          <div className="space-y-4">
+            {/* Extraction Error */}
+            {extractionError && (
+              <div className="rounded-lg p-3 text-sm" style={{ background: `${THEME.chart5}15`, color: THEME.chart5, border: `1px solid ${THEME.chart5}33` }}>
+                <FiAlertTriangle className="w-4 h-4 inline mr-2" />{extractionError}
+              </div>
+            )}
+
+            {/* No image yet - show drop zone */}
+            {!uploadedImage && !extractedPostText && (
+              <div
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handlePostDrop}
+                onClick={() => postFileInputRef.current?.click()}
+                className="rounded-xl p-10 flex flex-col items-center justify-center gap-4 cursor-pointer transition-all duration-200"
+                style={{
+                  background: isDragOver ? `${THEME.accent}11` : THEME.card,
+                  border: `2px dashed ${isDragOver ? THEME.accent : THEME.border}`,
+                  minHeight: 240,
+                }}
+              >
+                <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: `${THEME.accent}15` }}>
+                  <FiUploadCloud className="w-8 h-8" style={{ color: THEME.accent }} />
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-medium mb-1" style={{ color: THEME.fg }}>Drag & drop your LinkedIn post screenshot here</p>
+                  <p className="text-xs" style={{ color: THEME.mutedFg }}>or click to browse</p>
+                </div>
+                <p className="text-xs" style={{ color: THEME.mutedFg }}>Supports PNG, JPEG, WebP (max 10MB)</p>
+                <input
+                  ref={postFileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/jpg,image/webp"
+                  className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handlePostImageSelect(f); e.target.value = '' }}
+                />
+              </div>
+            )}
+
+            {/* Image uploaded - show preview */}
+            {uploadedImage && !extractedPostText && !extracting && (
+              <div className="space-y-4">
+                <div className="relative rounded-xl overflow-hidden" style={{ border: `1px solid ${THEME.border}` }}>
+                  <img src={uploadedImage.preview} alt="Uploaded screenshot" className="w-full max-h-[400px] object-contain" style={{ background: THEME.secondary }} />
+                  <button
+                    onClick={() => { setUploadedImage(null); setExtractionError(null) }}
+                    className="absolute top-3 right-3 w-8 h-8 rounded-lg flex items-center justify-center transition-colors duration-200"
+                    style={{ background: `${THEME.bg}cc`, color: THEME.fg }}
+                  >
+                    <FiX className="w-4 h-4" />
+                  </button>
+                </div>
+                <button
+                  onClick={handleExtractPost}
+                  className="w-full py-3.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all duration-200"
+                  style={{ background: THEME.accent, color: THEME.accentFg }}
+                >
+                  <FiImage className="w-4 h-4" /> Extract Text from Screenshot
+                </button>
+              </div>
+            )}
+
+            {/* Extracting */}
+            {extracting && (
+              <div className="rounded-xl p-10 flex flex-col items-center justify-center gap-4" style={{ background: THEME.card, border: `1px solid ${THEME.border}` }}>
+                <FiLoader className="w-8 h-8 animate-spin" style={{ color: THEME.accent }} />
+                <p className="text-sm font-medium" style={{ color: THEME.fg }}>Extracting text from image...</p>
+                <p className="text-xs" style={{ color: THEME.mutedFg }}>This may take a few seconds</p>
+              </div>
+            )}
+
+            {/* Extracted text - review */}
+            {extractedPostText && (
+              <div className="space-y-4">
+                <div className="rounded-xl p-4" style={{ background: THEME.card, border: `1px solid ${THEME.accent}44` }}>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-semibold flex items-center gap-2" style={{ color: THEME.fg }}>
+                      <FiCheck className="w-4 h-4" style={{ color: '#4ade80' }} /> Extracted Text
+                    </h3>
+                    <span className="text-xs" style={{ color: THEME.mutedFg }}>Review and edit if needed</span>
+                  </div>
+                  <textarea
+                    value={extractedPostText}
+                    onChange={(e) => setExtractedPostText(e.target.value)}
+                    className="w-full min-h-[180px] p-3 rounded-lg text-sm leading-relaxed resize-y focus:outline-none"
+                    style={{ background: THEME.input, color: THEME.fg, border: `1px solid ${THEME.border}` }}
+                  />
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleConfirmExtractedPost}
+                    className="flex-1 py-3 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all duration-200"
+                    style={{ background: THEME.accent, color: THEME.accentFg }}
+                  >
+                    <FiCheck className="w-4 h-4" /> Use This Text
+                  </button>
+                  <button
+                    onClick={() => { setExtractedPostText(''); setUploadedImage(null); setExtractionError(null) }}
+                    className="px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200"
+                    style={{ background: THEME.secondary, color: THEME.mutedFg, border: `1px solid ${THEME.border}` }}
+                  >
+                    <FiRefreshCw className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Privacy notice */}
+            <div className="flex items-center gap-2 pt-2" style={{ color: THEME.mutedFg }}>
+              <FiLock className="w-3.5 h-3.5 flex-shrink-0" />
+              <span className="text-xs">Your images are processed securely and never stored.</span>
+            </div>
           </div>
         )}
-
-        <button
-          onClick={handlePostRoast}
-          disabled={!isValid}
-          className="w-full py-3.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all duration-200"
-          style={{
-            background: isValid ? THEME.accent : THEME.muted,
-            color: isValid ? THEME.accentFg : THEME.mutedFg,
-            cursor: isValid ? 'pointer' : 'not-allowed',
-            opacity: isValid ? 1 : 0.6,
-          }}
-        >
-          <FiZap className="w-4 h-4" /> Roast This Post
-        </button>
 
         {/* Tips */}
         <div className="mt-8 rounded-xl p-5" style={{ background: THEME.card, border: `1px solid ${THEME.border}` }}>
@@ -682,7 +988,7 @@ export default function Page() {
             {[
               'Paste the complete post, including any hashtags or calls to action',
               'Include the exact text you plan to publish -- do not summarize',
-              'Longer posts give more material for a thorough roast',
+              'You can upload a screenshot of your LinkedIn post draft instead of typing',
               'The AI will analyze tone, structure, cringe level, and engagement potential',
             ].map((tip, i) => (
               <li key={i} className="flex items-start gap-2 text-xs leading-relaxed" style={{ color: THEME.mutedFg }}>
@@ -701,87 +1007,248 @@ export default function Page() {
     const isValid = profileData.headline.trim().length > 0
     return (
       <div className="min-h-screen flex flex-col px-4 py-8 max-w-2xl mx-auto w-full">
-        <button onClick={() => { setScreen('landing'); setError(null) }} className="inline-flex items-center gap-2 text-sm mb-8 transition-colors duration-200" style={{ color: THEME.mutedFg }}>
+        <button onClick={() => { setScreen('landing'); setError(null); setExtractionError(null) }} className="inline-flex items-center gap-2 text-sm mb-8 transition-colors duration-200" style={{ color: THEME.mutedFg }}>
           <FiArrowLeft className="w-4 h-4" /> Back to home
         </button>
 
         <div className="mb-6">
           <h1 className="font-serif font-bold text-2xl md:text-3xl mb-2" style={{ color: THEME.fg }}>Roast My Profile</h1>
-          <p className="text-sm" style={{ color: THEME.mutedFg }}>Enter your LinkedIn profile details for a comprehensive roast and improvement plan.</p>
+          <p className="text-sm" style={{ color: THEME.mutedFg }}>Enter your LinkedIn profile details or upload a screenshot for a comprehensive roast and improvement plan.</p>
         </div>
 
-        <div className="space-y-5">
-          {/* Headline */}
-          <div>
-            <label className="text-sm font-medium mb-1.5 block" style={{ color: THEME.fg }}>
-              Headline <span style={{ color: THEME.accent }}>*</span>
-            </label>
-            <input
-              type="text"
-              value={profileData.headline}
-              onChange={(e) => setProfileData(prev => ({ ...prev, headline: e.target.value }))}
-              placeholder="e.g., Marketing Manager | Growth Strategist"
-              className="w-full px-4 py-3 rounded-xl text-sm focus:outline-none transition-all duration-200"
-              style={{ background: THEME.input, color: THEME.fg, border: `1px solid ${THEME.border}` }}
-            />
-          </div>
+        <TabSwitcher
+          tabs={[
+            { id: 'type', label: 'Enter Details', icon: <FiEdit3 className="w-4 h-4" /> },
+            { id: 'upload', label: 'Upload Screenshot', icon: <FiCamera className="w-4 h-4" /> },
+          ]}
+          activeTab={profileInputTab}
+          onTabChange={(id) => { setProfileInputTab(id as 'type' | 'upload'); setExtractionError(null) }}
+        />
 
-          {/* About */}
-          <div>
-            <label className="text-sm font-medium mb-1.5 block" style={{ color: THEME.fg }}>About / Summary</label>
-            <textarea
-              value={profileData.about}
-              onChange={(e) => setProfileData(prev => ({ ...prev, about: e.target.value }))}
-              placeholder="Paste your LinkedIn summary/about section..."
-              className="w-full min-h-[120px] px-4 py-3 rounded-xl text-sm leading-relaxed resize-y focus:outline-none"
-              style={{ background: THEME.input, color: THEME.fg, border: `1px solid ${THEME.border}` }}
-            />
-          </div>
+        {profileInputTab === 'type' ? (
+          <>
+            <div className="space-y-5">
+              {/* Headline */}
+              <div>
+                <label className="text-sm font-medium mb-1.5 block" style={{ color: THEME.fg }}>
+                  Headline <span style={{ color: THEME.accent }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  value={profileData.headline}
+                  onChange={(e) => setProfileData(prev => ({ ...prev, headline: e.target.value }))}
+                  placeholder="e.g., Marketing Manager | Growth Strategist"
+                  className="w-full px-4 py-3 rounded-xl text-sm focus:outline-none transition-all duration-200"
+                  style={{ background: THEME.input, color: THEME.fg, border: `1px solid ${THEME.border}` }}
+                />
+              </div>
 
-          {/* Experience */}
-          <div>
-            <label className="text-sm font-medium mb-1.5 block" style={{ color: THEME.fg }}>Experience</label>
-            <textarea
-              value={profileData.experience}
-              onChange={(e) => setProfileData(prev => ({ ...prev, experience: e.target.value }))}
-              placeholder="List your roles, companies, and achievements..."
-              className="w-full min-h-[120px] px-4 py-3 rounded-xl text-sm leading-relaxed resize-y focus:outline-none"
-              style={{ background: THEME.input, color: THEME.fg, border: `1px solid ${THEME.border}` }}
-            />
-          </div>
+              {/* About */}
+              <div>
+                <label className="text-sm font-medium mb-1.5 block" style={{ color: THEME.fg }}>About / Summary</label>
+                <textarea
+                  value={profileData.about}
+                  onChange={(e) => setProfileData(prev => ({ ...prev, about: e.target.value }))}
+                  placeholder="Paste your LinkedIn summary/about section..."
+                  className="w-full min-h-[120px] px-4 py-3 rounded-xl text-sm leading-relaxed resize-y focus:outline-none"
+                  style={{ background: THEME.input, color: THEME.fg, border: `1px solid ${THEME.border}` }}
+                />
+              </div>
 
-          {/* Skills */}
-          <div>
-            <label className="text-sm font-medium mb-1.5 block" style={{ color: THEME.fg }}>Skills</label>
-            <textarea
-              value={profileData.skills}
-              onChange={(e) => setProfileData(prev => ({ ...prev, skills: e.target.value }))}
-              placeholder="Comma-separated list of skills..."
-              className="w-full min-h-[80px] px-4 py-3 rounded-xl text-sm leading-relaxed resize-y focus:outline-none"
-              style={{ background: THEME.input, color: THEME.fg, border: `1px solid ${THEME.border}` }}
-            />
-          </div>
-        </div>
+              {/* Experience */}
+              <div>
+                <label className="text-sm font-medium mb-1.5 block" style={{ color: THEME.fg }}>Experience</label>
+                <textarea
+                  value={profileData.experience}
+                  onChange={(e) => setProfileData(prev => ({ ...prev, experience: e.target.value }))}
+                  placeholder="List your roles, companies, and achievements..."
+                  className="w-full min-h-[120px] px-4 py-3 rounded-xl text-sm leading-relaxed resize-y focus:outline-none"
+                  style={{ background: THEME.input, color: THEME.fg, border: `1px solid ${THEME.border}` }}
+                />
+              </div>
 
-        {error && (
-          <div className="rounded-lg p-3 mt-4 text-sm" style={{ background: `${THEME.chart5}15`, color: THEME.chart5, border: `1px solid ${THEME.chart5}33` }}>
-            <FiAlertTriangle className="w-4 h-4 inline mr-2" />{error}
+              {/* Skills */}
+              <div>
+                <label className="text-sm font-medium mb-1.5 block" style={{ color: THEME.fg }}>Skills</label>
+                <textarea
+                  value={profileData.skills}
+                  onChange={(e) => setProfileData(prev => ({ ...prev, skills: e.target.value }))}
+                  placeholder="Comma-separated list of skills..."
+                  className="w-full min-h-[80px] px-4 py-3 rounded-xl text-sm leading-relaxed resize-y focus:outline-none"
+                  style={{ background: THEME.input, color: THEME.fg, border: `1px solid ${THEME.border}` }}
+                />
+              </div>
+            </div>
+
+            {error && (
+              <div className="rounded-lg p-3 mt-4 text-sm" style={{ background: `${THEME.chart5}15`, color: THEME.chart5, border: `1px solid ${THEME.chart5}33` }}>
+                <FiAlertTriangle className="w-4 h-4 inline mr-2" />{error}
+              </div>
+            )}
+
+            <button
+              onClick={handleProfileRoast}
+              disabled={!isValid}
+              className="w-full py-3.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 mt-6 transition-all duration-200"
+              style={{
+                background: isValid ? THEME.accent : THEME.muted,
+                color: isValid ? THEME.accentFg : THEME.mutedFg,
+                cursor: isValid ? 'pointer' : 'not-allowed',
+                opacity: isValid ? 1 : 0.6,
+              }}
+            >
+              <FiZap className="w-4 h-4" /> Roast This Profile
+            </button>
+          </>
+        ) : (
+          <div className="space-y-4">
+            {/* Extraction Error */}
+            {extractionError && (
+              <div className="rounded-lg p-3 text-sm" style={{ background: `${THEME.chart5}15`, color: THEME.chart5, border: `1px solid ${THEME.chart5}33` }}>
+                <FiAlertTriangle className="w-4 h-4 inline mr-2" />{extractionError}
+              </div>
+            )}
+
+            {/* No image yet - drop zone */}
+            {!profileUploadedImage && !extractedProfileData && (
+              <div
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleProfileDrop}
+                onClick={() => profileFileInputRef.current?.click()}
+                className="rounded-xl p-10 flex flex-col items-center justify-center gap-4 cursor-pointer transition-all duration-200"
+                style={{
+                  background: isDragOver ? `${THEME.accent}11` : THEME.card,
+                  border: `2px dashed ${isDragOver ? THEME.accent : THEME.border}`,
+                  minHeight: 240,
+                }}
+              >
+                <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: `${THEME.accent}15` }}>
+                  <FiUploadCloud className="w-8 h-8" style={{ color: THEME.accent }} />
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-medium mb-1" style={{ color: THEME.fg }}>Drag & drop your LinkedIn profile screenshot here</p>
+                  <p className="text-xs" style={{ color: THEME.mutedFg }}>or click to browse</p>
+                </div>
+                <p className="text-xs" style={{ color: THEME.mutedFg }}>Supports PNG, JPEG, WebP (max 10MB)</p>
+                <input
+                  ref={profileFileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/jpg,image/webp"
+                  className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleProfileImageSelect(f); e.target.value = '' }}
+                />
+              </div>
+            )}
+
+            {/* Image uploaded - preview */}
+            {profileUploadedImage && !extractedProfileData && !extracting && (
+              <div className="space-y-4">
+                <div className="relative rounded-xl overflow-hidden" style={{ border: `1px solid ${THEME.border}` }}>
+                  <img src={profileUploadedImage.preview} alt="Uploaded screenshot" className="w-full max-h-[400px] object-contain" style={{ background: THEME.secondary }} />
+                  <button
+                    onClick={() => { setProfileUploadedImage(null); setExtractionError(null) }}
+                    className="absolute top-3 right-3 w-8 h-8 rounded-lg flex items-center justify-center transition-colors duration-200"
+                    style={{ background: `${THEME.bg}cc`, color: THEME.fg }}
+                  >
+                    <FiX className="w-4 h-4" />
+                  </button>
+                </div>
+                <button
+                  onClick={handleExtractProfile}
+                  className="w-full py-3.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all duration-200"
+                  style={{ background: THEME.accent, color: THEME.accentFg }}
+                >
+                  <FiImage className="w-4 h-4" /> Extract Profile Data
+                </button>
+              </div>
+            )}
+
+            {/* Extracting */}
+            {extracting && (
+              <div className="rounded-xl p-10 flex flex-col items-center justify-center gap-4" style={{ background: THEME.card, border: `1px solid ${THEME.border}` }}>
+                <FiLoader className="w-8 h-8 animate-spin" style={{ color: THEME.accent }} />
+                <p className="text-sm font-medium" style={{ color: THEME.fg }}>Extracting profile data from image...</p>
+                <p className="text-xs" style={{ color: THEME.mutedFg }}>This may take a few seconds</p>
+              </div>
+            )}
+
+            {/* Extracted profile data - review */}
+            {extractedProfileData && (
+              <div className="space-y-4">
+                <div className="rounded-xl p-4" style={{ background: THEME.card, border: `1px solid ${THEME.accent}44` }}>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-semibold flex items-center gap-2" style={{ color: THEME.fg }}>
+                      <FiCheck className="w-4 h-4" style={{ color: '#4ade80' }} /> Extracted Profile Data
+                    </h3>
+                    <span className="text-xs" style={{ color: THEME.mutedFg }}>Review and edit if needed</span>
+                  </div>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-xs font-medium mb-1 block" style={{ color: THEME.mutedFg }}>Headline</label>
+                      <input
+                        type="text"
+                        value={extractedProfileData.headline}
+                        onChange={(e) => setExtractedProfileData(prev => prev ? { ...prev, headline: e.target.value } : prev)}
+                        className="w-full px-3 py-2 rounded-lg text-sm focus:outline-none"
+                        style={{ background: THEME.input, color: THEME.fg, border: `1px solid ${THEME.border}` }}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium mb-1 block" style={{ color: THEME.mutedFg }}>About</label>
+                      <textarea
+                        value={extractedProfileData.about}
+                        onChange={(e) => setExtractedProfileData(prev => prev ? { ...prev, about: e.target.value } : prev)}
+                        className="w-full min-h-[80px] px-3 py-2 rounded-lg text-sm leading-relaxed resize-y focus:outline-none"
+                        style={{ background: THEME.input, color: THEME.fg, border: `1px solid ${THEME.border}` }}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium mb-1 block" style={{ color: THEME.mutedFg }}>Experience</label>
+                      <textarea
+                        value={extractedProfileData.experience}
+                        onChange={(e) => setExtractedProfileData(prev => prev ? { ...prev, experience: e.target.value } : prev)}
+                        className="w-full min-h-[80px] px-3 py-2 rounded-lg text-sm leading-relaxed resize-y focus:outline-none"
+                        style={{ background: THEME.input, color: THEME.fg, border: `1px solid ${THEME.border}` }}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium mb-1 block" style={{ color: THEME.mutedFg }}>Skills</label>
+                      <textarea
+                        value={extractedProfileData.skills}
+                        onChange={(e) => setExtractedProfileData(prev => prev ? { ...prev, skills: e.target.value } : prev)}
+                        className="w-full min-h-[60px] px-3 py-2 rounded-lg text-sm leading-relaxed resize-y focus:outline-none"
+                        style={{ background: THEME.input, color: THEME.fg, border: `1px solid ${THEME.border}` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleConfirmExtractedProfile}
+                    className="flex-1 py-3 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all duration-200"
+                    style={{ background: THEME.accent, color: THEME.accentFg }}
+                  >
+                    <FiCheck className="w-4 h-4" /> Use This Data
+                  </button>
+                  <button
+                    onClick={() => { setExtractedProfileData(null); setProfileUploadedImage(null); setExtractionError(null) }}
+                    className="px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200"
+                    style={{ background: THEME.secondary, color: THEME.mutedFg, border: `1px solid ${THEME.border}` }}
+                  >
+                    <FiRefreshCw className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Privacy notice */}
+            <div className="flex items-center gap-2 pt-2" style={{ color: THEME.mutedFg }}>
+              <FiLock className="w-3.5 h-3.5 flex-shrink-0" />
+              <span className="text-xs">Your images are processed securely and never stored.</span>
+            </div>
           </div>
         )}
-
-        <button
-          onClick={handleProfileRoast}
-          disabled={!isValid}
-          className="w-full py-3.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 mt-6 transition-all duration-200"
-          style={{
-            background: isValid ? THEME.accent : THEME.muted,
-            color: isValid ? THEME.accentFg : THEME.mutedFg,
-            cursor: isValid ? 'pointer' : 'not-allowed',
-            opacity: isValid ? 1 : 0.6,
-          }}
-        >
-          <FiZap className="w-4 h-4" /> Roast This Profile
-        </button>
       </div>
     )
   }
@@ -883,6 +1350,19 @@ export default function Page() {
           </div>
         </div>
 
+        {/* LinkedIn Publish Result */}
+        {linkedInPublishResult && (
+          <div className="rounded-lg p-3 mb-6 text-sm flex items-center gap-2" style={{
+            background: linkedInPublishResult.success ? '#4ade8015' : `${THEME.chart5}15`,
+            color: linkedInPublishResult.success ? '#4ade80' : THEME.chart5,
+            border: `1px solid ${linkedInPublishResult.success ? '#4ade8033' : `${THEME.chart5}33`}`,
+          }}>
+            {linkedInPublishResult.success ? <FiCheck className="w-4 h-4 flex-shrink-0" /> : <FiAlertTriangle className="w-4 h-4 flex-shrink-0" />}
+            {linkedInPublishResult.message}
+            <button onClick={() => setLinkedInPublishResult(null)} className="ml-auto flex-shrink-0" style={{ color: 'inherit' }}><FiX className="w-3.5 h-3.5" /></button>
+          </div>
+        )}
+
         {/* Storytelling Rewrite */}
         <div className="rounded-xl p-6 mb-6" style={{ background: THEME.card, border: `1px solid ${THEME.border}` }}>
           <div className="flex items-center justify-between mb-4">
@@ -890,7 +1370,18 @@ export default function Page() {
               <FiBookOpen className="w-5 h-5" style={{ color: THEME.chart2 }} />
               {r.storytelling_rewrite?.title ?? 'Storytelling Rewrite'}
             </h3>
-            <CopyButton text={`${r.storytelling_rewrite?.hook ?? ''}\n\n${r.storytelling_rewrite?.content ?? ''}`} label="Copy" />
+            <div className="flex items-center gap-2">
+              <CopyButton text={`${r.storytelling_rewrite?.hook ?? ''}\n\n${r.storytelling_rewrite?.content ?? ''}`} label="Copy" />
+              <button
+                onClick={() => handlePublishToLinkedIn(`${r.storytelling_rewrite?.hook ?? ''}\n\n${r.storytelling_rewrite?.content ?? ''}`)}
+                disabled={publishingToLinkedIn}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200"
+                style={{ background: THEME.accent, color: THEME.accentFg, opacity: publishingToLinkedIn ? 0.6 : 1 }}
+              >
+                {publishingToLinkedIn ? <FiLoader className="w-3.5 h-3.5 animate-spin" /> : <FiShare2 className="w-3.5 h-3.5" />}
+                {publishingToLinkedIn ? 'Publishing...' : 'Publish to LinkedIn'}
+              </button>
+            </div>
           </div>
           {r.storytelling_rewrite?.hook && (
             <div className="rounded-lg p-3 mb-4" style={{ background: `${THEME.chart2}15`, borderLeft: `3px solid ${THEME.chart2}` }}>
@@ -910,7 +1401,18 @@ export default function Page() {
               <FiTrendingUp className="w-5 h-5" style={{ color: THEME.chart1 }} />
               {r.data_driven_rewrite?.title ?? 'Data-Driven Rewrite'}
             </h3>
-            <CopyButton text={`${r.data_driven_rewrite?.hook ?? ''}\n\n${r.data_driven_rewrite?.content ?? ''}`} label="Copy" />
+            <div className="flex items-center gap-2">
+              <CopyButton text={`${r.data_driven_rewrite?.hook ?? ''}\n\n${r.data_driven_rewrite?.content ?? ''}`} label="Copy" />
+              <button
+                onClick={() => handlePublishToLinkedIn(`${r.data_driven_rewrite?.hook ?? ''}\n\n${r.data_driven_rewrite?.content ?? ''}`)}
+                disabled={publishingToLinkedIn}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200"
+                style={{ background: THEME.accent, color: THEME.accentFg, opacity: publishingToLinkedIn ? 0.6 : 1 }}
+              >
+                {publishingToLinkedIn ? <FiLoader className="w-3.5 h-3.5 animate-spin" /> : <FiShare2 className="w-3.5 h-3.5" />}
+                {publishingToLinkedIn ? 'Publishing...' : 'Publish to LinkedIn'}
+              </button>
+            </div>
           </div>
           {r.data_driven_rewrite?.hook && (
             <div className="rounded-lg p-3 mb-4" style={{ background: `${THEME.chart1}15`, borderLeft: `3px solid ${THEME.chart1}` }}>
